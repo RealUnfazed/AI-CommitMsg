@@ -128,7 +128,7 @@ For example:
 
 ```text
 M       README.md
-A       tools/ai_commit.py
+A       ai_commit.py
 ```
 
 ### 🔀 Staged diff
@@ -240,7 +240,7 @@ nvidia/nemotron-3-ultra-550b-a55b:free
 Set your OpenRouter API key in:
 
 ```text
-tools/ai_commit.py
+ai_commit.py
 ```
 
 ```python
@@ -370,8 +370,7 @@ feat: add AI commit generation
 ```text
 ai-conventional-commit/
 │
-├── tools/
-│   └── ai_commit.py
+├── ai_commit.py
 │
 ├── .gitignore
 ├── README.md
