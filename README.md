@@ -30,7 +30,7 @@ No Git editor. No Vim. No commit-message template.
 - 🌐 Uses OpenRouter's API
 - 🔄 Supports fallback models when the configured model is unavailable
 - 🎯 Supports choosing a model for a single command
-- 🪶 No framework or heavy dependencies
+- 🛠 No framework or heavy dependencies
 - 🚫 No Git hook required
 
 ---
@@ -547,7 +547,7 @@ feat: add AI commit generation
 ## 🧩 Project Structure
 
 ```text
-ai-conventional-commit/
+AI-CommitMsg/
 │
 ├── ai_commit.py
 ├── .env.example
