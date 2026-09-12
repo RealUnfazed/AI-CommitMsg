@@ -1,6 +1,6 @@
 # 🤖 AI Conventional Commit
 
-An AI-powered Git commit assistant that analyzes your **staged changes** and generates a Conventional Commit title and description using [OpenRouter](https://openrouter.ai/).
+An AI-powered Git commit assistant that analyzes your **staged changes** and generates a Conventional Commit title and description using OpenRouter.
 
 Instead of staring at a diff trying to figure out what to write, run:
 
@@ -9,7 +9,7 @@ git add .
 git aicommit
 ```
 
-The AI generates the commit **title first**, lets you review or edit it, then generates a **description** and lets you review, edit, or skip it before creating the commit.
+The AI generates the commit message, lets you review or edit it, and then creates the commit for you.
 
 No Git editor. No Vim. No commit-message template.
 
@@ -21,13 +21,15 @@ No Git editor. No Vim. No commit-message template.
 - 📝 AI-generated commit descriptions
 - ✏️ Edit the title before committing
 - ✏️ Edit the description before committing
-- ⏭️ Skip the description and commit with the title only
+- ⏭️ Choose title-only commits
 - 🔍 Analyzes staged files and the actual staged diff
 - 🧠 Uses recent commit history for context
 - 📏 Keeps generated commit titles concise
 - 🧩 Supports Conventional Commit types, scopes, and breaking changes
 - ⚡ Runs directly through a simple Git alias
 - 🌐 Uses OpenRouter's API
+- 🔄 Supports fallback models when the configured model is unavailable
+- 🎯 Supports choosing a model for a single command
 - 🪶 No framework or heavy dependencies
 - 🚫 No Git hook required
 
@@ -35,43 +37,102 @@ No Git editor. No Vim. No commit-message template.
 
 ## 🚀 How It Works
 
-The workflow is intentionally split into two stages.
+When you run:
 
-```text
-                    git aicommit
-                         │
-                         ▼
-                Analyze staged changes
-                         │
-                         ▼
-                 Generate title
-                         │
-              ┌──────────┼──────────┐
-              ▼          ▼           ▼
-             Yes        Edit         No
-              │          │           │
-              │          ▼           │
-              │     Review again     │
-              │                      │
-              └──────────┬───────────┘
-                         │
-                         ▼
-                Generate description
-                         │
-              ┌──────────┼──────────┐
-              ▼          ▼           ▼
-             Yes        Edit         No
-              │          │           │
-              │          ▼           │
-              │     Review again     │
-              │                      │
-              └──────────┬───────────┘
-                         │
-                         ▼
-                    git commit
+```bash
+git aicommit
 ```
 
-### Example
+the generator first asks whether you want a **title only** or a **title + description** commit.
+
+### Title only
+
+```text
+git aicommit
+       │
+       ▼
+Analyze staged changes
+       │
+       ▼
+Generate title
+       │
+  ┌────┼────┐
+  ▼    ▼    ▼
+ Yes  Edit  No
+  │    │    │
+  │    ▼    │
+  │ Review  │
+  │ again   │
+  └────┬────┘
+       │
+       ▼
+   git commit
+```
+
+### Title + description
+
+The title is generated first.
+
+While you review or edit the title, the description is generated **in the background**. This means the description can already be ready by the time you finish reviewing the title.
+
+```text
+                 git aicommit
+                      │
+                      ▼
+             Analyze staged changes
+                      │
+                      ▼
+                Generate title
+                      │
+              ┌───────┴────────┐
+              │                │
+              ▼                ▼
+        Review title     Generate description
+              │             in background
+              │                │
+       ┌──────┼──────┐         │
+       ▼      ▼      ▼         │
+      Yes    Edit    No        │
+       │      │      │         │
+       │      ▼      │         │
+       │   Review    │         │
+       │    again    │         │
+       └──────┬──────┘         │
+              │                │
+              └───────┬────────┘
+                      ▼
+             Review description
+                      │
+               ┌──────┼──────┐
+               ▼      ▼      ▼
+              Yes    Edit    No
+               │      │      │
+               │      ▼      │
+               │   Review    │
+               │    again    │
+               └──────┬──────┘
+                      │
+                      ▼
+                 git commit
+```
+
+---
+
+## 📝 Example
+
+When starting the command, you'll choose the type of commit you want:
+
+```text
+What would you like to generate?
+
+[1] Title only
+[2] Title + description
+[N] Cancel
+
+Choose [1/2/n]:
+```
+
+For a title-only commit:
 
 ```text
 Generating AI commit title...
@@ -87,32 +148,34 @@ Generated commit title:
 Choose [Y/e/n]: y
 
 
-Generating AI commit description...
-
-Generated commit description:
-
-  Add an OpenRouter-powered workflow that analyzes staged
-  changes and creates Conventional Commit messages.
-
-[Y] Yes
-[E] Edit
-[N] No description
-
-Choose [Y/e/n]: y
-
-
 Committing...
 
 [master 4c91a2f] feat: add AI commit generation
 ```
 
-If you choose **N** for the description, the commit still happens:
+For a title + description commit:
+
+```text
+Generating AI commit title...
+
+Generated commit title:
+
+  feat: add AI commit generation
+
+Generating AI commit description in background...
+
+[Y] Yes
+[E] Edit
+[N] Cancel
+
+Choose [Y/e/n]: y
+```
+
+If you choose to skip the description, the commit is created using the title only:
 
 ```text
 feat: add AI commit generation
 ```
-
-The description is simply omitted.
 
 ---
 
@@ -145,7 +208,7 @@ This is the primary source of truth for the generated commit.
 
 Recent commit subjects are also provided so the generated message can better match the existing style of the repository.
 
-The diff is limited to a reasonable size before being sent to the API to avoid unnecessarily huge requests.
+The diff is limited to a configurable size before being sent to the API to avoid unnecessarily large requests.
 
 ---
 
@@ -214,50 +277,47 @@ feat(api)!: change response format
 - Git
 - Python 3
 - An OpenRouter API key
-- A repository with staged changes
 
 No Python packages are required.
 
-The project uses Python's built-in libraries for:
+### 1. Get the project
 
-- Git commands
-- HTTP requests
-- JSON handling
-- Input/output
-
----
-
-## 🔑 OpenRouter
-
-The generator communicates with OpenRouter using its OpenAI-compatible chat completions API.
-
-The configured model is:
-
-```text
-nvidia/nemotron-3-ultra-550b-a55b:free
-```
-
-Set your OpenRouter API key in:
-
-```text
-ai_commit.py
-```
-
-```python
-OPENROUTER_API_KEY = "your-api-key"
-```
-
----
-
-## 🛠️ Git Alias
-
-The project is designed to be used through:
+Clone the repository or download it to your computer.
 
 ```bash
-git aicommit
+git clone https://github.com/RealUnfazed/AI-CommitMsg.git
+cd AI-CommitMsg
 ```
 
-Configure the alias:
+### 2. Create your `.env`
+
+Copy the provided example configuration:
+
+#### PowerShell
+
+```powershell
+Copy-Item .env.example .env
+```
+
+#### CMD
+
+```cmd
+copy .env.example .env
+```
+
+### 3. Add your OpenRouter API key
+
+Open `.env` and set your API key:
+
+```env
+OPENROUTER_API_KEY=your-api-key
+```
+
+You can also change the default model and other settings in this file.
+
+### 4. Configure the Git alias
+
+Tell Git where `ai_commit.py` is located:
 
 ```powershell
 git config --global alias.aicommit '!python "C:/path/to/ai_commit.py"'
@@ -269,33 +329,125 @@ For example:
 git config --global alias.aicommit '!python "C:/Users/Unfazed/Documents/Python/AI-CommitMsg/ai_commit.py"'
 ```
 
-Check that Git recognizes it:
+### 5. Start using it
 
-```powershell
+Go to any Git repository, stage your changes, and run:
+
+```bash
+git add .
 git aicommit
 ```
 
+That's it.
+
 ---
 
-### Already Have an `aicommit` Alias or Wanna remove Alias?
+## 🔑 Configuration
 
-The Git alias is **global**, so if you already configured `aicommit` for another project, remove the old alias first:
+The available configuration options are provided in `.env.example`.
+
+A typical `.env` looks like:
+
+```env
+# OpenRouter
+OPENROUTER_API_KEY=YOUR_OPENROUTER_API_KEY
+
+# Default model
+OPENROUTER_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
+
+# Comma-separated fallback models
+OPENROUTER_FALLBACK_MODELS=
+
+# OpenRouter API
+OPENROUTER_URL=https://openrouter.ai/api/v1/chat/completions
+OPENROUTER_HTTP_REFERER=https://github.com/RealUnfazed
+OPENROUTER_TITLE=AI Conventional Commit Generator
+
+# Generation
+MAX_DIFF_CHARS=30000
+MAX_HISTORY_COMMITS=30
+MAX_TOKENS=180
+REQUEST_TIMEOUT=120
+TEMPERATURE=0
+```
+
+Most users only need to configure:
+
+```env
+OPENROUTER_API_KEY=your-api-key
+OPENROUTER_MODEL=your-model
+```
+
+The other options can be left at their defaults.
+
+---
+
+## 🔄 Fallback Models
+
+You can configure additional models in `.env`:
+
+```env
+OPENROUTER_FALLBACK_MODELS=model-one,model-two,model-three
+```
+
+For example:
+
+```env
+OPENROUTER_MODEL=primary/model
+OPENROUTER_FALLBACK_MODELS=fallback/model-one,fallback/model-two
+```
+
+If the primary model is temporarily unavailable, overloaded, or rate-limited, the generator can try the configured fallback models.
+
+This can be especially useful when using free models.
+
+---
+
+## 🎯 Choose a Model for One Commit
+
+You can override the default model for a single run:
+
+```bash
+git aicommit --model "another/model"
+```
+
+For example:
+
+```bash
+git aicommit --model "nvidia/nemotron-3-ultra-550b-a55b:free"
+```
+
+This only affects that command and does not change your `.env`.
+
+---
+
+## 🛠️ Git Alias
+
+The project is designed to be used through:
+
+```bash
+git aicommit
+```
+
+If you need to change the alias later, remove the existing one:
 
 ```powershell
 git config --global --unset alias.aicommit
 ```
 
-Then configure it again with the path to this project's `ai_commit.py`:
+Then configure it again:
 
 ```powershell
 git config --global alias.aicommit '!python "C:/path/to/ai_commit.py"'
 ```
 
-You can verify the current alias with:
+You can check the current alias with:
 
 ```powershell
 git config --global --get alias.aicommit
 ```
+
+---
 
 ## 📦 Usage
 
@@ -311,15 +463,44 @@ Then run:
 git aicommit
 ```
 
-### Don't use:
+The generator will ask:
+
+```text
+What would you like to generate?
+
+[1] Title only
+[2] Title + description
+[N] Cancel
+
+Choose [1/2/n]:
+```
+
+### Title only
+
+Choose this when you only want a Conventional Commit title:
+
+```text
+feat: add user authentication
+```
+
+### Title + description
+
+Choose this when you want both:
+
+```text
+feat: add user authentication
+
+Add authentication support for user accounts and
+protect authenticated routes.
+```
+
+Normal Git commits still work normally:
 
 ```bash
 git commit
 ```
 
-for the AI workflow.
-
-Normal Git commits still work normally, but `git aicommit` is the command that invokes the AI generator.
+But `git aicommit` is the command that invokes the AI generator.
 
 ---
 
@@ -349,15 +530,13 @@ You can rewrite it before committing.
 
 ### Skip the description
 
-Choosing:
+If you selected the title + description workflow, you can choose:
 
 ```text
 [N] No description
 ```
 
-does **not** cancel the commit.
-
-The commit is created using the title only:
+The commit is still created using the title only:
 
 ```text
 feat: add AI commit generation
@@ -371,7 +550,7 @@ feat: add AI commit generation
 ai-conventional-commit/
 │
 ├── ai_commit.py
-│
+├── .env.example
 ├── .gitignore
 ├── README.md
 └── LICENSE
@@ -380,52 +559,6 @@ ai-conventional-commit/
 The generator is intentionally kept as a single Python script.
 
 There is no framework, package manager, or build step.
-
----
-
-## 🔄 Commit Generation Pipeline
-
-Internally, the process looks like this:
-
-```text
-Git repository
-      │
-      ▼
-Staged files
-      │
-      ├───────────────┐
-      ▼               ▼
-   Git diff      Recent commits
-      │               │
-      └───────┬───────┘
-              ▼
-        Context builder
-              │
-              ▼
-         OpenRouter API
-              │
-              ▼
-        Commit title
-              │
-              ▼
-         User review
-              │
-              ▼
-        OpenRouter API
-              │
-              ▼
-       Commit description
-              │
-              ▼
-         User review
-              │
-              ▼
-          git commit
-```
-
-The final commit is created locally by Git. The AI only generates the text.
-
----
 
 ## 🔐 Privacy
 
@@ -439,7 +572,13 @@ The tool does **not** send your entire repository automatically.
 
 Only the information included in the generated prompt is sent to OpenRouter.
 
-Be careful when staging files containing secrets, credentials, private keys, or other sensitive information.
+Be careful when staging files containing sensitive information such as:
+
+- API keys
+- Passwords
+- Credentials
+- Private keys
+- Tokens
 
 ---
 
@@ -456,6 +595,12 @@ Always review the generated title and description before committing.
 Very large staged diffs are limited before being sent to the model.
 
 This keeps API requests from becoming unnecessarily large, but means the model may not see every line of an extremely large change.
+
+The limit can be configured with:
+
+```env
+MAX_DIFF_CHARS=30000
+```
 
 ### The tool requires staged changes
 
@@ -477,13 +622,19 @@ Stage your changes first:
 git add .
 ```
 
+### Model availability can vary
+
+OpenRouter models, especially free models, can occasionally be unavailable, overloaded, or rate-limited.
+
+Configure fallback models if you want additional options.
+
 ---
 
 ## 🪝 Git Hook
 
 This project **does not require a Git hook**.
 
-Current implementation handles the entire workflow directly through:
+The entire workflow is handled directly through:
 
 ```bash
 git aicommit
@@ -493,11 +644,12 @@ This is intentional.
 
 The AI workflow needs interactive steps for:
 
-- title confirmation
-- title editing
-- description confirmation
-- description editing
-- skipping the description
+- Choosing title-only or title + description
+- Title confirmation
+- Title editing
+- Description confirmation
+- Description editing
+- Skipping the description
 
 A standalone Git command provides much cleaner control over that workflow than `prepare-commit-msg`.
 

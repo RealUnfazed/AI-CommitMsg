@@ -1,17 +1,156 @@
+import argparse
 import json
+import os
 import re
 import subprocess
+import threading
 import urllib.error
 import urllib.request
 
 
-OPENROUTER_API_KEY = "YOUR_OPENROUTER_API_KEY"
+SCRIPT_DIRECTORY = os.path.dirname(
+    os.path.abspath(__file__)
+)
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
+ENV_FILE = os.path.join(
+    SCRIPT_DIRECTORY,
+    ".env",
+)
 
-MAX_DIFF_CHARS = 30000
-MAX_HISTORY_COMMITS = 30
+
+DEFAULTS = {
+    "OPENROUTER_API_KEY": "",
+    "OPENROUTER_MODEL": "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "OPENROUTER_FALLBACK_MODELS": "",
+    "OPENROUTER_URL": "https://openrouter.ai/api/v1/chat/completions",
+    "OPENROUTER_HTTP_REFERER": "https://github.com/RealUnfazed",
+    "OPENROUTER_TITLE": "AI Conventional Commit Generator",
+    "MAX_DIFF_CHARS": "30000",
+    "MAX_HISTORY_COMMITS": "30",
+    "MAX_TOKENS": "180",
+    "REQUEST_TIMEOUT": "120",
+    "TEMPERATURE": "0",
+}
+
+
+def load_env_file(path):
+    values = {}
+
+    if not os.path.isfile(path):
+        return values
+
+    try:
+        with open(
+            path,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            for raw_line in file:
+                line = raw_line.strip()
+
+                if not line:
+                    continue
+
+                if line.startswith("#"):
+                    continue
+
+                if "=" not in line:
+                    continue
+
+                key, value = line.split(
+                    "=",
+                    1,
+                )
+
+                key = key.strip()
+                value = value.strip()
+
+                if (
+                    len(value) >= 2
+                    and value[0] == value[-1]
+                    and value[0] in (
+                        '"',
+                        "'",
+                    )
+                ):
+                    value = value[1:-1]
+
+                values[key] = value
+
+    except OSError as exc:
+        raise RuntimeError(
+            f"Could not read .env file: {exc}"
+        )
+
+
+    return values
+
+
+ENV_VALUES = load_env_file(
+    ENV_FILE
+)
+
+
+def get_config(name):
+    if name in os.environ:
+        return os.environ[name]
+
+    if name in ENV_VALUES:
+        return ENV_VALUES[name]
+
+    return DEFAULTS.get(
+        name,
+        "",
+    )
+
+
+OPENROUTER_API_KEY = get_config(
+    "OPENROUTER_API_KEY"
+)
+
+OPENROUTER_URL = get_config(
+    "OPENROUTER_URL"
+)
+
+OPENROUTER_HTTP_REFERER = get_config(
+    "OPENROUTER_HTTP_REFERER"
+)
+
+OPENROUTER_TITLE = get_config(
+    "OPENROUTER_TITLE"
+)
+
+DEFAULT_MODEL = get_config(
+    "OPENROUTER_MODEL"
+)
+
+FALLBACK_MODELS = [
+    model.strip()
+    for model in get_config(
+        "OPENROUTER_FALLBACK_MODELS"
+    ).split(",")
+    if model.strip()
+]
+
+MAX_DIFF_CHARS = int(
+    get_config("MAX_DIFF_CHARS")
+)
+
+MAX_HISTORY_COMMITS = int(
+    get_config("MAX_HISTORY_COMMITS")
+)
+
+MAX_TOKENS = int(
+    get_config("MAX_TOKENS")
+)
+
+REQUEST_TIMEOUT = int(
+    get_config("REQUEST_TIMEOUT")
+)
+
+TEMPERATURE = float(
+    get_config("TEMPERATURE")
+)
 
 
 COMMIT_TYPES = (
@@ -26,11 +165,63 @@ COMMIT_TYPES = (
     "ci",
 )
 
+
 COMMIT_PATTERN = re.compile(
     r"^(feat|fix|docs|refactor|perf|test|chore|build|ci)"
     r"(?:\([^)]+\))?"
     r"!?: .+$"
 )
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Generate Conventional Commit messages "
+            "using OpenRouter."
+        )
+    )
+
+    parser.add_argument(
+        "--model",
+        dest="model",
+        default=None,
+        help=(
+            "Override the OpenRouter model for this run."
+        ),
+    )
+
+    return parser.parse_args()
+
+
+def get_models(selected_model=None):
+    models = []
+
+    if selected_model:
+        models.append(
+            selected_model.strip()
+        )
+    else:
+        if DEFAULT_MODEL:
+            models.append(
+                DEFAULT_MODEL.strip()
+            )
+
+        for model in FALLBACK_MODELS:
+            if model not in models:
+                models.append(model)
+
+    models = [
+        model
+        for model in models
+        if model
+    ]
+
+    if not models:
+        raise RuntimeError(
+            "No OpenRouter models are configured."
+        )
+
+    return models
 
 
 def run_git(*args):
@@ -43,7 +234,10 @@ def run_git(*args):
     )
 
     if result.returncode != 0:
-        error = result.stderr.strip() or result.stdout.strip()
+        error = (
+            result.stderr.strip()
+            or result.stdout.strip()
+        )
 
         raise RuntimeError(
             error or "Git command failed."
@@ -118,148 +312,322 @@ Staged diff:
 """.strip()
 
 
-def call_openrouter(prompt):
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You generate Git Conventional Commit "
-                    "messages. Follow the user's requested "
-                    "output format exactly."
-                ),
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-        ],
-        "temperature": 0,
-        "max_tokens": 180,
-        "reasoning": {
-            "enabled": False
-        },
-    }
-
-    request = urllib.request.Request(
-        OPENROUTER_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-        headers={
-            "Authorization": (
-                f"Bearer {OPENROUTER_API_KEY}"
-            ),
-            "Content-Type": "application/json",
-            "HTTP-Referer": (
-                "https://github.com/RealUnfazed"
-            ),
-            "X-OpenRouter-Title": (
-                "AI Conventional Commit Generator"
-            ),
-        },
+def is_retryable_api_error(status_code):
+    return status_code in (
+        408,
+        409,
+        425,
+        429,
+        500,
+        502,
+        503,
+        504,
     )
 
+
+def extract_api_error(body):
     try:
-        with urllib.request.urlopen(
-            request,
-            timeout=120,
-        ) as response:
-            response_data = response.read().decode(
-                "utf-8",
-                errors="replace",
-            )
+        error_data = json.loads(body)
 
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode(
-            "utf-8",
-            errors="replace",
+        error = error_data.get(
+            "error",
+            {},
         )
-
-        try:
-            error_data = json.loads(body)
-
-            error = error_data.get(
-                "error",
-                {}
-            )
-
-            if isinstance(error, dict):
-                error_message = error.get(
-                    "message",
-                    body,
-                )
-            else:
-                error_message = str(error)
-
-        except json.JSONDecodeError:
-            error_message = body
-
-        raise RuntimeError(
-            f"OpenRouter API error ({exc.code}): "
-            f"{error_message}"
-        )
-
-    except urllib.error.URLError as exc:
-        raise RuntimeError(
-            f"Could not connect to OpenRouter: "
-            f"{exc.reason}"
-        )
-
-    except TimeoutError:
-        raise RuntimeError(
-            "OpenRouter request timed out."
-        )
-
-    try:
-        result = json.loads(response_data)
-
-    except json.JSONDecodeError:
-        raise RuntimeError(
-            "OpenRouter returned invalid JSON."
-        )
-
-    if "error" in result:
-        error = result["error"]
 
         if isinstance(error, dict):
             message = error.get(
                 "message",
-                "Unknown OpenRouter error.",
+                body,
             )
-        else:
-            message = str(error)
 
+            code = error.get(
+                "code"
+            )
+
+            if code:
+                return (
+                    f"{message} "
+                    f"(code: {code})"
+                )
+
+            return str(message)
+
+        return str(error)
+
+    except json.JSONDecodeError:
+        return body.strip() or "Unknown API error."
+
+
+def call_openrouter(
+    prompt,
+    models,
+):
+    if not OPENROUTER_API_KEY:
         raise RuntimeError(
-            f"OpenRouter API error: {message}"
+            "OPENROUTER_API_KEY is not configured.\n"
+            f"Set it in:\n{ENV_FILE}"
         )
 
-    choices = result.get("choices")
+    errors = []
 
-    if not choices:
-        raise RuntimeError(
-            "OpenRouter returned no choices."
+    for model in models:
+        print(
+            f"Using model: {model}"
         )
 
-    content = (
-        choices[0]
-        .get("message", {})
-        .get("content")
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You generate Git Conventional "
+                        "Commit messages. Follow the "
+                        "user's requested output format "
+                        "exactly."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            "temperature": TEMPERATURE,
+            "max_tokens": MAX_TOKENS,
+            "reasoning": {
+                "enabled": False
+            },
+        }
+
+        request = urllib.request.Request(
+            OPENROUTER_URL,
+            data=json.dumps(
+                payload
+            ).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": (
+                    f"Bearer {OPENROUTER_API_KEY}"
+                ),
+                "Content-Type": (
+                    "application/json"
+                ),
+                "HTTP-Referer": (
+                    OPENROUTER_HTTP_REFERER
+                ),
+                "X-OpenRouter-Title": (
+                    OPENROUTER_TITLE
+                ),
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=REQUEST_TIMEOUT,
+            ) as response:
+                response_data = (
+                    response.read()
+                    .decode(
+                        "utf-8",
+                        errors="replace",
+                    )
+                )
+
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode(
+                "utf-8",
+                errors="replace",
+            )
+
+            error_message = extract_api_error(
+                body
+            )
+
+            if is_retryable_api_error(
+                exc.code
+            ):
+                errors.append(
+                    f"{model}: "
+                    f"OpenRouter returned "
+                    f"{exc.code}: "
+                    f"{error_message}"
+                )
+
+                print(
+                    f"Model failed ({exc.code}), "
+                    f"trying next model..."
+                )
+
+                continue
+
+            raise RuntimeError(
+                f"OpenRouter API error "
+                f"({exc.code}) using {model}: "
+                f"{error_message}"
+            )
+
+        except urllib.error.URLError as exc:
+            errors.append(
+                f"{model}: "
+                f"Could not connect to OpenRouter: "
+                f"{exc.reason}"
+            )
+
+            print(
+                "Connection failed, "
+                "trying next model..."
+            )
+
+            continue
+
+        except TimeoutError:
+            errors.append(
+                f"{model}: "
+                "OpenRouter request timed out."
+            )
+
+            print(
+                "Request timed out, "
+                "trying next model..."
+            )
+
+            continue
+
+        except OSError as exc:
+            errors.append(
+                f"{model}: "
+                f"Network error: {exc}"
+            )
+
+            print(
+                "Network error, "
+                "trying next model..."
+            )
+
+            continue
+
+        try:
+            result = json.loads(
+                response_data
+            )
+
+        except json.JSONDecodeError:
+            errors.append(
+                f"{model}: "
+                "OpenRouter returned invalid JSON."
+            )
+
+            print(
+                "Invalid response, "
+                "trying next model..."
+            )
+
+            continue
+
+        if "error" in result:
+            error = result["error"]
+
+            if isinstance(error, dict):
+                message = error.get(
+                    "message",
+                    "Unknown OpenRouter error.",
+                )
+
+                code = error.get(
+                    "code"
+                )
+            else:
+                message = str(error)
+                code = None
+
+            if (
+                isinstance(code, int)
+                and is_retryable_api_error(code)
+            ):
+                errors.append(
+                    f"{model}: "
+                    f"OpenRouter API error "
+                    f"{code}: {message}"
+                )
+
+                print(
+                    f"Model failed ({code}), "
+                    f"trying next model..."
+                )
+
+                continue
+
+            raise RuntimeError(
+                f"OpenRouter API error using "
+                f"{model}: {message}"
+            )
+
+        choices = result.get(
+            "choices"
+        )
+
+        if not choices:
+            errors.append(
+                f"{model}: "
+                "OpenRouter returned no choices."
+            )
+
+            print(
+                "No choices returned, "
+                "trying next model..."
+            )
+
+            continue
+
+        content = (
+            choices[0]
+            .get("message", {})
+            .get("content")
+        )
+
+        if not isinstance(
+            content,
+            str,
+        ):
+            errors.append(
+                f"{model}: "
+                "OpenRouter returned no text content."
+            )
+
+            print(
+                "No text returned, "
+                "trying next model..."
+            )
+
+            continue
+
+        content = content.strip()
+
+        if not content:
+            errors.append(
+                f"{model}: "
+                "OpenRouter returned empty content."
+            )
+
+            print(
+                "Empty response, "
+                "trying next model..."
+            )
+
+            continue
+
+        return content
+
+    error_text = "\n".join(
+        f"- {error}"
+        for error in errors
     )
 
-    if not isinstance(content, str):
-        raise RuntimeError(
-            "OpenRouter returned no text content."
-        )
-
-    content = content.strip()
-
-    if not content:
-        raise RuntimeError(
-            "OpenRouter returned empty content."
-        )
-
-    return content
+    raise RuntimeError(
+        "All configured OpenRouter models failed.\n\n"
+        f"{error_text}"
+    )
 
 
 def extract_lines(text):
@@ -285,7 +653,9 @@ def extract_lines(text):
 
 
 def clean_title(response):
-    lines = extract_lines(response)
+    lines = extract_lines(
+        response
+    )
 
     for line in lines:
         line = re.sub(
@@ -300,32 +670,40 @@ def clean_title(response):
     for line in lines:
         match = re.search(
             r"\b(feat|fix|docs|refactor|perf|test|chore|build|ci)"
-            r"(?:\([^)]+\))?"
-            r"!?: .+",
+            r"(?:\([^)]+\))? !?: .+",
             line,
         )
 
         if match:
-            candidate = match.group(0).strip()
+            candidate = match.group(
+                0
+            ).strip()
 
-            if COMMIT_PATTERN.match(candidate):
+            if COMMIT_PATTERN.match(
+                candidate
+            ):
                 return candidate
 
     raise RuntimeError(
-        "The model did not return a valid Conventional Commit title.\n"
+        "The model did not return a valid "
+        "Conventional Commit title.\n"
         f"Model output:\n{response}"
     )
 
 
 def clean_description(response):
-    lines = extract_lines(response)
+    lines = extract_lines(
+        response
+    )
 
     if not lines:
         raise RuntimeError(
             "The model returned an empty description."
         )
 
-    description = " ".join(lines)
+    description = " ".join(
+        lines
+    )
 
     description = re.sub(
         r"^[`\"']+|[`\"']+$",
@@ -342,14 +720,19 @@ def clean_description(response):
 
 
 def validate_title(title):
-    if not COMMIT_PATTERN.match(title):
+    if not COMMIT_PATTERN.match(
+        title
+    ):
         raise RuntimeError(
             "Invalid Conventional Commit title:\n"
             f"{title}"
         )
 
 
-def generate_title(context):
+def generate_title(
+    context,
+    models,
+):
     prompt = f"""
 Generate ONE Git Conventional Commit TITLE.
 
@@ -387,19 +770,19 @@ Context:
 """.strip()
 
     return clean_title(
-        call_openrouter(prompt)
+        call_openrouter(
+            prompt,
+            models,
+        )
     )
 
 
 def generate_description(
-    title,
     context,
+    models,
 ):
     prompt = f"""
-Generate ONE concise Git commit DESCRIPTION for this
-Conventional Commit title:
-
-{title}
+Generate ONE concise Git commit DESCRIPTION.
 
 Rules:
 
@@ -407,11 +790,11 @@ Rules:
 - Describe only the actual staged changes.
 - Do not invent functionality.
 - Keep it concise.
-- Do not repeat the title.
 - Do not include a heading.
 - Do not use Markdown.
 - Output ONLY the description.
 - Use one or two concise sentences.
+- Do not output a Conventional Commit title.
 
 Context:
 
@@ -419,7 +802,10 @@ Context:
 """.strip()
 
     return clean_description(
-        call_openrouter(prompt)
+        call_openrouter(
+            prompt,
+            models,
+        )
     )
 
 
@@ -439,7 +825,9 @@ def edit_title(title):
             "The commit title cannot be empty."
         )
 
-    validate_title(edited)
+    validate_title(
+        edited
+    )
 
     return edited
 
@@ -463,10 +851,60 @@ def edit_description(description):
     return edited
 
 
+def choose_generation_mode():
+    while True:
+        print()
+        print(
+            "What do you want to generate?"
+        )
+        print()
+        print("[1] Title only")
+        print("[2] Title + description")
+        print("[N] Cancel")
+        print()
+
+        answer = input(
+            "Choose [1/2/n]: "
+        ).strip().lower()
+
+        if answer in (
+            "1",
+            "title",
+            "title only",
+        ):
+            return "title"
+
+        if answer in (
+            "2",
+            "both",
+            "title + description",
+        ):
+            return "both"
+
+        if answer in (
+            "",
+            "n",
+            "no",
+            "q",
+            "quit",
+            "cancel",
+        ):
+            print()
+            print("Cancelled.")
+            return None
+
+        print()
+        print(
+            "Please choose 1, 2, or N."
+        )
+
+
 def choose_title(title):
     while True:
         print()
-        print("Generated commit title:")
+        print(
+            "Generated commit title:"
+        )
         print()
         print(f"  {title}")
         print()
@@ -490,7 +928,10 @@ def choose_title(title):
             "e",
             "edit",
         ):
-            title = edit_title(title)
+            title = edit_title(
+                title
+            )
+
             continue
 
         if answer in (
@@ -498,27 +939,37 @@ def choose_title(title):
             "no",
             "q",
             "quit",
+            "cancel",
         ):
             print()
             print("Cancelled.")
+
             return None
 
         print()
-        print("Please choose Y, E, or N.")
+        print(
+            "Please choose Y, E, or N."
+        )
 
 
-def choose_description(description):
+def choose_description(
+    description
+):
     while True:
         print()
-        print("Generated commit description:")
+        print(
+            "Generated commit description:"
+        )
         print()
-        print(f"  {description}")
+        print(
+            f"  {description}"
+        )
         print()
         print("[Y] Yes")
         print("[E] Edit")
         print("[N] No description")
         print()
-        
+
         answer = input(
             "Choose [Y/e/n]: "
         ).strip().lower()
@@ -537,16 +988,20 @@ def choose_description(description):
             description = edit_description(
                 description
             )
+
             continue
 
         if answer in (
             "n",
             "no",
+            "skip",
         ):
             return None
 
         print()
-        print("Please choose Y, E, or N.")
+        print(
+            "Please choose Y, E, or N."
+        )
 
 
 def create_commit(
@@ -578,12 +1033,60 @@ def create_commit(
     return result.returncode
 
 
+class BackgroundGeneration:
+    def __init__(
+        self,
+        function,
+    ):
+        self.function = function
+        self.result = None
+        self.error = None
+        self.thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+        )
+
+    def _run(self):
+        try:
+            self.result = self.function()
+
+        except Exception as exc:
+            self.error = exc
+
+    def start(self):
+        self.thread.start()
+
+    def wait(self):
+        self.thread.join()
+
+        if self.error:
+            raise self.error
+
+        return self.result
+
+    def is_finished(self):
+        return not self.thread.is_alive()
+
+
 def main():
     try:
-        repository_root = get_repository_root()
-        staged_files = get_staged_files()
-        staged_diff = get_staged_diff()
-        recent_commits = get_recent_commits()
+        args = parse_arguments()
+
+        repository_root = (
+            get_repository_root()
+        )
+
+        staged_files = (
+            get_staged_files()
+        )
+
+        staged_diff = (
+            get_staged_diff()
+        )
+
+        recent_commits = (
+            get_recent_commits()
+        )
 
         if not staged_diff.strip():
             raise RuntimeError(
@@ -596,15 +1099,61 @@ def main():
             staged_diff,
         )
 
+        models = get_models(
+            args.model
+        )
+
         print()
-        print("Generating AI commit title...")
-        print(f"Repository: {repository_root}")
-        print(f"Model: {OPENROUTER_MODEL}")
+        print(
+            "AI Conventional Commit"
+        )
+        print(
+            f"Repository: {repository_root}"
+        )
+        print(
+            f"Primary model: {models[0]}"
+        )
+
+        if len(models) > 1:
+            print(
+                f"Fallback models: "
+                f"{len(models) - 1}"
+            )
+
+        mode = choose_generation_mode()
+
+        if mode is None:
+            return 0
+
         print()
+        print(
+            "Generating AI commit title..."
+        )
 
         title = generate_title(
-            context
+            context,
+            models,
         )
+
+        description_task = None
+
+        if mode == "both":
+            print()
+            print(
+                "Generating AI commit description "
+                "in the background..."
+            )
+
+            description_task = (
+                BackgroundGeneration(
+                    lambda: generate_description(
+                        context,
+                        models,
+                    )
+                )
+            )
+
+            description_task.start()
 
         title = choose_title(
             title
@@ -613,18 +1162,27 @@ def main():
         if title is None:
             return 0
 
-        print()
-        print("Generating AI commit description...")
-        print()
+        description = None
 
-        description = generate_description(
-            title,
-            context,
-        )
+        if mode == "both":
+            print()
 
-        description = choose_description(
-            description
-        )
+            if description_task.is_finished():
+                print(
+                    "Description is ready."
+                )
+            else:
+                print(
+                    "Waiting for the description..."
+                )
+
+            description = (
+                description_task.wait()
+            )
+
+            description = choose_description(
+                description
+            )
 
         print()
         print("Committing...")
@@ -637,6 +1195,7 @@ def main():
     except KeyboardInterrupt:
         print()
         print("Cancelled.")
+
         return 1
 
     except Exception as exc:
@@ -651,5 +1210,6 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
-
+    raise SystemExit(
+        main()
+    )
