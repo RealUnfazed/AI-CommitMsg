@@ -82,7 +82,6 @@ def load_env_file(path):
             f"Could not read .env file: {exc}"
         )
 
-
     return values
 
 
@@ -154,20 +153,32 @@ TEMPERATURE = float(
 
 
 COMMIT_TYPES = (
+    "initial",
     "feat",
     "fix",
     "docs",
+    "style",
     "refactor",
     "perf",
     "test",
-    "chore",
     "build",
     "ci",
+    "chore",
+    "revert",
+    "security",
+    "deps",
+    "release",
+)
+
+
+COMMIT_TYPES_PATTERN = "|".join(
+    re.escape(commit_type)
+    for commit_type in COMMIT_TYPES
 )
 
 
 COMMIT_PATTERN = re.compile(
-    r"^(feat|fix|docs|refactor|perf|test|chore|build|ci)"
+    rf"^({COMMIT_TYPES_PATTERN})"
     r"(?:\([^)]+\))?"
     r"!?: .+$"
 )
@@ -456,7 +467,7 @@ def call_openrouter(
 
                 print(
                     f"Model failed ({exc.code}), "
-                    f"trying next model..."
+                    "trying next model..."
                 )
 
                 continue
@@ -553,7 +564,7 @@ def call_openrouter(
 
                 print(
                     f"Model failed ({code}), "
-                    f"trying next model..."
+                    "trying next model..."
                 )
 
                 continue
@@ -669,7 +680,7 @@ def clean_title(response):
 
     for line in lines:
         match = re.search(
-            r"\b(feat|fix|docs|refactor|perf|test|chore|build|ci)"
+            rf"\b({COMMIT_TYPES_PATTERN})"
             r"(?:\([^)]+\))? !?: .+",
             line,
         )
@@ -733,20 +744,16 @@ def generate_title(
     context,
     models,
 ):
+    allowed_types = "\n".join(
+        COMMIT_TYPES
+    )
+
     prompt = f"""
 Generate ONE Git Conventional Commit TITLE.
 
 Allowed types:
 
-feat
-fix
-docs
-refactor
-perf
-test
-chore
-build
-ci
+{allowed_types}
 
 Rules:
 
