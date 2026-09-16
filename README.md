@@ -2,6 +2,10 @@
 
 An AI-powered Git commit assistant that analyzes your **staged changes** and generates a Conventional Commit title and description using OpenRouter.
 
+> ⚠️ **Important**
+>
+> <mark> OpenRouter models may be removed, deprecated, or rotated over time. **Make sure you add your own model name to your `.env` file** before running the script. </mark>
+
 Instead of staring at a diff trying to figure out what to write, run:
 
 ```bash

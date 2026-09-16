@@ -20,7 +20,7 @@ ENV_FILE = os.path.join(
 
 DEFAULTS = {
     "OPENROUTER_API_KEY": "",
-    "OPENROUTER_MODEL": "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "OPENROUTER_MODEL": "",
     "OPENROUTER_FALLBACK_MODELS": "",
     "OPENROUTER_URL": "https://openrouter.ai/api/v1/chat/completions",
     "OPENROUTER_HTTP_REFERER": "https://github.com/RealUnfazed",
